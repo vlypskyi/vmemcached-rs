@@ -10,13 +10,17 @@ keywords = ["memcache", "memcached", "driver", "cache", "database"]
 edition = "2018"
 
 [features]
-default = []
+default = ["tls"]
 compress = ["brotli"]
+tls = ["rustls", "tokio-rustls", "webpki-roots"]
 
 [dependencies]
 url = { version = "2", default-features = false }
 serde = { version = "1", default-features = false }
 brotli = { version = "3.3", default-features = false, features = ["std"], optional = true }
+rustls = { version = "0.20", optional = true }
+tokio-rustls = { version = "0.23.4", optional = true }
+webpki-roots = { version = "0.22.6", optional = true }
 serde_json = { version = "1.0", default-features = true }
 btoi = { version = "0.4", default-features = false }
 nom = { version = "7", default-features = false, features = ["std"] }

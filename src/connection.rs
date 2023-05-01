@@ -5,15 +5,31 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufStream, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 
+#[cfg(feature = "tls")]
+use std::sync::Arc;
+#[cfg(feature = "tls")]
+use rustls::{ClientConfig, ServerName};
+#[cfg(feature = "tls")]
+use tokio_rustls::{TlsConnector, client::TlsStream};
+
+#[cfg(not(feature = "tls"))]
+type Stream = BufStream<TcpStream>;
+
+#[cfg(feature = "tls")]
+type Stream = BufStream<TlsStream<TcpStream>>;
+
 pin_project! {
     /// Connection wrapper
     #[derive(Debug)]
     #[must_use = "Connection do nothing unless polled"]
     pub struct Connection {
         #[pin]
-        stream: BufStream<TcpStream>
+        stream: Stream
     }
 }
+
+#[cfg(feature = "tls")]
+pub(crate) type TlsConfig = Arc<ClientConfig>;
 
 impl AsyncRead for Connection {
     fn poll_read(
@@ -49,6 +65,7 @@ impl AsyncBufRead for Connection {
     }
 }
 
+#[cfg(not(feature = "tls"))]
 impl Connection {
     /// Connect to to given socket address
     pub async fn connect<A: ToSocketAddrs>(address: A) -> Result<Connection, io::Error> {
@@ -74,6 +91,42 @@ impl Connection {
 
     /// Get reference to Stream
     pub fn get_ref(&self) -> &TcpStream {
+        &self.stream.get_ref()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl Connection {
+    /// Securely connect to to given socket address
+    pub async fn connect<A: ToSocketAddrs>(address: A, server_name: ServerName, tls_config: TlsConfig) -> Result<Connection, io::Error> {
+        let tls_connector = TlsConnector::from(tls_config);
+        let tcp_stream = TcpStream::connect(&address).await?;
+        let tls_stream = tls_connector.connect(server_name, tcp_stream).await?;
+
+        Ok(Connection {
+            stream: BufStream::new(tls_stream)
+        })
+    }
+
+    /// Check if connection is broken by trying to read from it
+    ///
+    /// try_read()
+    /// If data is successfully read, `Ok(n)` is returned, where `n` is the
+    /// number of bytes read. `Ok(0)` indicates the stream's read half is closed
+    /// and will no longer yield data. If the stream is not ready to read data
+    /// `Err(io::ErrorKind::WouldBlock)` is returned.
+    pub fn has_broken(&self) -> bool {
+        self.stream
+            .get_ref()
+            .get_ref()
+            .0
+            .try_read(&mut []) // dirty way to try to read without buffer
+            .map(|value| value == 0) // 0 indicates the stream's read half is closed
+            .unwrap_or(true) // unwrap any error as true
+    }
+
+    /// Get reference to Stream
+    pub fn get_ref(&self) -> &TlsStream<TcpStream> {
         &self.stream.get_ref()
     }
 }

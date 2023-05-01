@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::parser::{Response, Value};
-use crate::{parser, MemcacheError, PoolConnection, Settings};
+use crate::{parser, MemcacheError, PoolConnection, Settings, Connection, settings};
 
 const EMPTY_SPACE_BYTES: &[u8] = b" ";
 const NEW_LINE_BYTES: &[u8] = b"\r\n";
@@ -292,7 +292,7 @@ where
 /// version\r\n
 ///
 ///
-/// "VERSION <version>\r\n", where <version> is the version string for the
+/// "VERSION <version>\r\n", where <version> is the version string for the memcached server
 pub async fn version(
     conn: &mut PoolConnection<'_>,
     settings: &Settings,
@@ -311,6 +311,32 @@ pub async fn version(
 
     match parser::parse_version(&buffer) {
         Ok((_left, result)) => Ok(result),
+        Err(e) => Err(MemcacheError::Nom(format!("{}", e))),
+    }
+}
+
+
+/// Internal connection ping-check using a default buffer size.
+/// version\r\n
+///
+/// "VERSION <version>\r\n", where <version> is the version string for the memcached server
+pub(crate) async fn ping(
+    conn: &mut Connection
+) -> Result<(), MemcacheError> {
+    // <command name>
+    let _ = conn.write(COMMAND_VERSION).await?;
+
+    // Flush command
+    let _ = conn.flush().await?;
+
+    let mut buffer: BytesMut = BytesMut::with_capacity(settings::DEFAULT_BUFFER_SIZE);
+
+    if conn.read_buf(&mut buffer).await? == 0 {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
+
+    match parser::parse_version(&buffer) {
+        Ok(_) => Ok(()),
         Err(e) => Err(MemcacheError::Nom(format!("{}", e))),
     }
 }

@@ -1,7 +1,6 @@
 //! Vinted Rust memcache
 #![deny(
     bad_style,
-    const_err,
     dead_code,
     deprecated,
     improper_ctypes,

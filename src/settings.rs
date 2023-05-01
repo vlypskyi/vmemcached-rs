@@ -1,4 +1,4 @@
-const DEFAULT_BUFFER_SIZE: usize = 128;
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 128;
 
 /// Client settings
 #[derive(Clone, Debug)]

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
+#[cfg(feature = "tls")]
+use rustls::{client::InvalidDnsNameError, ClientConfig , ServerName};
 use std::convert::TryFrom;
-use std::io;
 use std::net::SocketAddr;
-use tokio::io::{Interest, Ready};
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
     config::{ResolverConfig, ResolverOpts},
@@ -11,19 +11,44 @@ use trust_dns_resolver::{
 use url::Url;
 
 use crate::connection::Connection;
-use crate::MemcacheError;
+use crate::{MemcacheError, driver};
+#[cfg(feature = "tls")]
+use crate::{ErrorKind, connection::TlsConfig};
 
 /// A `bb8::ManageConnection` for `memcache_async::ascii::Protocol`.
 #[derive(Clone, Debug)]
 pub struct ConnectionManager {
     url: Url,
     resolver: TokioAsyncResolver,
+    #[cfg(feature = "tls")]
+    tls_config: TlsConfig
 }
 
+#[cfg(not(feature = "tls"))]
 impl ConnectionManager {
     /// Initialize ConnectionManager with given URL
     pub fn new(url: Url, resolver: TokioAsyncResolver) -> ConnectionManager {
         ConnectionManager { url, resolver }
+    }
+}
+
+#[cfg(feature = "tls")]
+impl ConnectionManager {
+    /// Initialize secure ConnectionManager with given URL and default TLS config
+    pub fn new(url: Url, resolver: TokioAsyncResolver) -> ConnectionManager {
+        Self::new_with_config(url, resolver, Self::default_tls_config())
+    }
+
+    /// Initialize secure ConnectionManager with given URL and custom TLS config
+    pub fn new_with_config(url: Url, resolver: TokioAsyncResolver, tls_config: ClientConfig) -> ConnectionManager {
+        ConnectionManager { url, resolver, tls_config: TlsConfig::new(tls_config) }
+    }
+
+    fn default_tls_config() -> ClientConfig {
+        rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth()
     }
 }
 
@@ -76,6 +101,7 @@ impl bb8::ManageConnection for ConnectionManager {
     type Connection = Connection;
     type Error = MemcacheError;
 
+    #[cfg(not(feature = "tls"))]
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
         let addresses = match self.url.domain() {
             Some(domain) => {
@@ -94,22 +120,50 @@ impl bb8::ManageConnection for ConnectionManager {
         Connection::connect(&*addresses).await.map_err(Into::into)
     }
 
-    async fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
-        let ready = conn
-            .get_ref()
-            .ready(Interest::READABLE | Interest::WRITABLE)
-            .await?;
+    #[cfg(feature = "tls")]
+    async fn connect(&self) -> Result<Self::Connection, Self::Error> {
+        let (addresses, server_name) = match self.url.domain() {
+            Some(domain) => {
+                let response = self.resolver.lookup_ip(domain).await?;
 
-        // Check connection for all states: READABLE | WRITABLE | READ_CLOSED | WRITE_CLOSED
-        if ready == Ready::ALL {
-            Ok(())
-        } else {
-            Err(io::ErrorKind::UnexpectedEof.into())
-        }
+                let port = self.url.port().unwrap_or(11211);
+
+                let addresses = response
+                    .iter()
+                    .map(|ip| SocketAddr::new(ip, port))
+                    .collect();
+
+                (addresses, ServerName::try_from(domain)?)
+            }
+            None => {
+                let addresses = self.url.socket_addrs(|| None)?;
+                match addresses.first().map(|it| it.ip()) {
+                    Some(addr) => {
+                        (addresses, ServerName::IpAddress(addr))
+                    }
+                    None => {
+                        return Err(MemcacheError::Memcache(ErrorKind::Generic("No IP addresses resolved".to_string())));
+                    }
+                }
+            }
+        };
+
+        Connection::connect(&*addresses, server_name, self.tls_config.clone()).await.map_err(Into::into)
+    }
+
+    async fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
+        driver::ping(conn).await
     }
 
     fn has_broken(&self, conn: &mut Self::Connection) -> bool {
         conn.has_broken()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl From<InvalidDnsNameError> for MemcacheError {
+    fn from(value: InvalidDnsNameError) -> Self {
+        MemcacheError::Memcache(ErrorKind::Generic(value.to_string()))
     }
 }
 
