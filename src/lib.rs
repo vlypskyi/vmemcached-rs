@@ -48,6 +48,8 @@ pub use crate::manager::ConnectionManager;
 pub use crate::settings::Settings;
 pub use bb8::{ErrorSink, State};
 pub use connection::Connection;
+#[cfg(feature = "tls")]
+pub use connection::TlsConfig;
 pub use parser::Status;
 
 /// R2D2 connection pool

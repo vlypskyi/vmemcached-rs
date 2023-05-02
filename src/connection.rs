@@ -28,8 +28,10 @@ pin_project! {
     }
 }
 
+
+/// Wrapped Rustls client configuration
 #[cfg(feature = "tls")]
-pub(crate) type TlsConfig = Arc<ClientConfig>;
+pub type TlsConfig = Arc<ClientConfig>;
 
 impl AsyncRead for Connection {
     fn poll_read(

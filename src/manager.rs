@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 #[cfg(feature = "tls")]
-use rustls::{client::InvalidDnsNameError, ClientConfig , ServerName};
+use rustls::{client::InvalidDnsNameError, ClientConfig, ServerName};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 #[cfg(feature = "tls")]
@@ -38,12 +38,12 @@ impl ConnectionManager {
 impl ConnectionManager {
     /// Initialize secure ConnectionManager with given URL and default TLS config
     pub fn new(url: Url, resolver: TokioAsyncResolver) -> ConnectionManager {
-        Self::new_with_config(url, resolver, Self::default_tls_config())
+        Self::new_with_config(url, resolver, TlsConfig::new(Self::default_tls_config()))
     }
 
     /// Initialize secure ConnectionManager with given URL and custom TLS config
-    pub fn new_with_config(url: Url, resolver: TokioAsyncResolver, tls_config: ClientConfig) -> ConnectionManager {
-        ConnectionManager { url, resolver, tls_config: TlsConfig::new(tls_config) }
+    pub fn new_with_config(url: Url, resolver: TokioAsyncResolver, tls_config: TlsConfig) -> ConnectionManager {
+        ConnectionManager { url, resolver, tls_config }
     }
 
     fn default_tls_config() -> ClientConfig {
@@ -112,10 +112,10 @@ impl TryFrom<(Url, ResolverConfig, ResolverOpts)> for ConnectionManager {
 }
 
 #[cfg(feature = "tls")]
-impl TryFrom<(&str, ClientConfig)> for ConnectionManager {
+impl TryFrom<(&str, TlsConfig)> for ConnectionManager {
     type Error = MemcacheError;
 
-    fn try_from(value: (&str, ClientConfig)) -> Result<Self, Self::Error> {
+    fn try_from(value: (&str, TlsConfig)) -> Result<Self, Self::Error> {
         let (config, opts) = read_system_conf()?;
 
         let resolver = TokioAsyncResolver::tokio(config, opts)?;
@@ -125,10 +125,10 @@ impl TryFrom<(&str, ClientConfig)> for ConnectionManager {
 }
 
 #[cfg(feature = "tls")]
-impl TryFrom<(Url, ClientConfig)> for ConnectionManager {
+impl TryFrom<(Url, TlsConfig)> for ConnectionManager {
     type Error = MemcacheError;
 
-    fn try_from(value: (Url, ClientConfig)) -> Result<Self, Self::Error> {
+    fn try_from(value: (Url, TlsConfig)) -> Result<Self, Self::Error> {
         let (config, opts) = read_system_conf()?;
 
         let resolver = TokioAsyncResolver::tokio(config, opts)?;
@@ -138,10 +138,10 @@ impl TryFrom<(Url, ClientConfig)> for ConnectionManager {
 }
 
 #[cfg(feature = "tls")]
-impl TryFrom<(&str, ResolverConfig, ResolverOpts, ClientConfig)> for ConnectionManager {
+impl TryFrom<(&str, ResolverConfig, ResolverOpts, TlsConfig)> for ConnectionManager {
     type Error = MemcacheError;
 
-    fn try_from(value: (&str, ResolverConfig, ResolverOpts, ClientConfig)) -> Result<Self, Self::Error> {
+    fn try_from(value: (&str, ResolverConfig, ResolverOpts, TlsConfig)) -> Result<Self, Self::Error> {
         let resolver = TokioAsyncResolver::tokio(value.1, value.2)?;
 
         Ok(Self::new_with_config(Url::parse(value.0)?, resolver, value.3))
